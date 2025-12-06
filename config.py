@@ -4,7 +4,7 @@ class Config:
     # Veri yolları
     # Organize edilmiş veri klasörünü kullan (organize_data.py çalıştırdıktan sonra)
     DATA_DIR = '/content/TI-ROI-D_KANSER_TESPI-TI-/organized'
-    MODEL_SAVE_PATH = '/content/TI-ROI-D_KANSER_TESPI-TI-/checkpoints'
+    MODEL_SAVE_PATH = '/content/TI-ROI-D_KANSER_TESPI-TI-/organized/model_checkpoints'
     
     # Model parametreleri
     IMAGE_SIZE = 128  # 128x128
