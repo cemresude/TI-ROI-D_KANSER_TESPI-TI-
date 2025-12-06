@@ -3,8 +3,8 @@ import torch
 class Config:
     # Veri yolları
     # Organize edilmiş veri klasörünü kullan (organize_data.py çalıştırdıktan sonra)
-    DATA_DIR = '/Users/cemresudeakdag/Downloads/Thyroid Dataset/DDTI dataset/DDTI/organized'
-    MODEL_SAVE_PATH = '/Users/cemresudeakdag/TİROİD_KANSER_TESPİTİ/checkpoints'
+    DATA_DIR = '/content/TI-ROI-D_KANSER_TESPI-TI-/organized'
+    MODEL_SAVE_PATH = '/content/TI-ROI-D_KANSER_TESPI-TI-/checkpoints'
     
     # Model parametreleri
     IMAGE_SIZE = 128  # 128x128
