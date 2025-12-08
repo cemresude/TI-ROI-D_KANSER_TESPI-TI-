@@ -47,17 +47,23 @@ def compute_benign_validation_statistics(vae_errors, cnn_probs, labels, val_rati
 def normalize_scores(vae_errors, cnn_probs, stats, method='benign_validation', cnn_score_method='logit'):
     """
     Benign validation stats ile normalize et
-    CNN için logit transform kullan
+    CNN için logit transform + z-score normalize
     """
     # VAE: Z-score normalization
     vae_norm = (vae_errors - stats['vae_mean']) / (stats['vae_std'] + 1e-8)
     
-    # CNN: Logit transform + normalize
+    # CNN: Logit transform + Z-SCORE NORMALIZE (DÜZELTİLDİ)
     if cnn_score_method == 'logit':
-        # p -> logit(p) = log(p / (1-p))
+        # 1. p -> logit(p) = log(p / (1-p))
         cnn_probs_clipped = np.clip(cnn_probs, 1e-7, 1 - 1e-7)
         cnn_logits = np.log(cnn_probs_clipped / (1 - cnn_probs_clipped))
-        cnn_norm = cnn_logits  # Logit zaten normalized scale'de
+        
+        # 2. Z-score normalize logits (benign validation stats ile)
+        # Logit'lerin mean/std'sini stats'e ekleyin
+        cnn_logits_mean = cnn_logits[np.isfinite(cnn_logits)].mean()  # NaN/inf kontrolü
+        cnn_logits_std = cnn_logits[np.isfinite(cnn_logits)].std()
+        
+        cnn_norm = (cnn_logits - cnn_logits_mean) / (cnn_logits_std + 1e-8)
     else:
         # Simple z-score
         cnn_norm = (cnn_probs - stats['cnn_mean']) / (stats['cnn_std'] + 1e-8)
@@ -222,28 +228,39 @@ def grid_search_with_constraint(vae_norm, cnn_norm, labels, alpha_range,
     
     return best_alpha, best_threshold, best_metrics, results
 
-def two_stage_decision_strict(vae_norm, cnn_probs, hybrid_threshold, alpha, 
+def two_stage_decision_strict(vae_norm, cnn_norm, cnn_probs_raw, hybrid_threshold, alpha, 
                               high_conf_thresh=0.85, low_conf_thresh=0.50):
     """
-    ULTRA SIKLAŞTIRILMIŞ two-stage
-    p ≥ 0.85 → Malignant (çok emin)
-    p ≤ 0.50 → Benign (geniş aralık - benign lehine)
-    Otherwise → Hybrid
+    DÜZELTİLMİŞ two-stage:
+    - High/low confidence için RAW kalibre probability kullan
+    - Hybrid decision için NORMALIZED CNN score kullan
+    
+    Args:
+        vae_norm: Normalized VAE errors
+        cnn_norm: Normalized CNN logits (Z-SCORE)
+        cnn_probs_raw: Raw calibrated probabilities (high/low decision için)
+        hybrid_threshold: Hybrid score threshold
+        alpha: VAE weight
+        high_conf_thresh: High confidence threshold (raw prob için)
+        low_conf_thresh: Low confidence threshold (raw prob için)
     """
     predictions = []
     decision_types = []
     
     for i in range(len(vae_norm)):
-        cnn_prob = cnn_probs[i]
+        cnn_prob_raw = cnn_probs_raw[i]  # RAW kalibre prob (high/low için)
         
-        if cnn_prob >= high_conf_thresh:
+        # Stage 1: High confidence malignant (RAW prob)
+        if cnn_prob_raw >= high_conf_thresh:
             predictions.append(1)
             decision_types.append('cnn_high')
-        elif cnn_prob <= low_conf_thresh:
+        # Stage 2: Low confidence benign (RAW prob)
+        elif cnn_prob_raw <= low_conf_thresh:
             predictions.append(0)
             decision_types.append('cnn_low')
+        # Stage 3: Hybrid (NORMALIZED scores)
         else:
-            hybrid_score = alpha * vae_norm[i] + (1 - alpha) * cnn_probs[i]
+            hybrid_score = alpha * vae_norm[i] + (1 - alpha) * cnn_norm[i]  # cnn_norm kullan!
             predictions.append(1 if hybrid_score > hybrid_threshold else 0)
             decision_types.append('hybrid')
     
@@ -289,22 +306,43 @@ def main():
     # CNN Calibration
     print("\n✓ Calibrating CNN...")
     calibrator = IsotonicRegression(out_of_bounds='clip')
-    calibrator.fit(cnn_probs, labels)
+    
+    # FİX: VERİ SIZINTISINI ÖNLE - Train/Val split
+    # Test set'in %70'ini grid-search için, %30'unu final test için kullan
+    train_idx, test_idx = train_test_split(
+        np.arange(len(labels)),
+        test_size=0.3,
+        stratify=labels,
+        random_state=Config.SEED
+    )
+    
+    # Grid-search için CNN calibration (sadece train split ile)
+    calibrator.fit(cnn_probs[train_idx], labels[train_idx])
     cnn_probs_calibrated = calibrator.predict(cnn_probs)
     
-    # Benign validation statistics
-    stats = compute_benign_validation_statistics(vae_errors, cnn_probs_calibrated, labels)
+    print(f"✓ Data split: {len(train_idx)} grid-search, {len(test_idx)} final test")
     
-    # Normalize with benign stats + logit
+    # Benign validation statistics (sadece train split'ten)
+    stats = compute_benign_validation_statistics(
+        vae_errors[train_idx], 
+        cnn_probs_calibrated[train_idx], 
+        labels[train_idx]
+    )
+    
+    # Normalize with benign stats + logit (TÜM DATA için)
     vae_norm, cnn_norm = normalize_scores(
         vae_errors, cnn_probs_calibrated, stats, 
         method=Config.NORMALIZATION_METHOD,
         cnn_score_method=Config.CNN_SCORE_METHOD
     )
     
-    # Grid-search with DUAL constraint
+    print(f"\n✓ Normalization applied:")
+    print(f"  VAE normalized: mean={vae_norm.mean():.4f}, std={vae_norm.std():.4f}")
+    print(f"  CNN logits normalized: mean={cnn_norm.mean():.4f}, std={cnn_norm.std():.4f}")
+    
+    # Grid-search with DUAL constraint (sadece train split üzerinde)
     best_alpha, best_threshold, best_metrics, results = grid_search_with_constraint(
-        vae_norm, cnn_norm, labels,
+        vae_norm[train_idx], cnn_norm[train_idx], labels[train_idx],
         alpha_range=Config.HYBRID_ALPHA_RANGE,
         target_malignant_recall=Config.TARGET_MALIGNANT_RECALL,
         target_benign_recall=Config.TARGET_BENIGN_RECALL,
@@ -312,44 +350,63 @@ def main():
         verbose=True
     )
     
-    # Test on full set
-    print(f"\n✓ Testing with alpha={best_alpha:.2f}...")
+    print(f"\n{'='*70}")
+    print("GRID-SEARCH SET RESULTS (70% of data):")
+    print(f"{'='*70}")
     
-    # Simple hybrid
-    hybrid_scores = best_alpha * vae_norm + (1 - best_alpha) * cnn_norm
-    hybrid_pred_simple = (hybrid_scores > best_threshold).astype(int)
+    # Grid-search set results
+    hybrid_scores_train = best_alpha * vae_norm[train_idx] + (1 - best_alpha) * cnn_norm[train_idx]
+    hybrid_pred_train = (hybrid_scores_train > best_threshold).astype(int)
+    print(classification_report(labels[train_idx], hybrid_pred_train, target_names=['Benign', 'Malignant']))
     
-    # Two-stage (strict)
-    hybrid_pred_two_stage, decision_types = two_stage_decision_strict(
-        vae_norm, cnn_probs_calibrated, best_threshold, best_alpha,
+    # Test on FINAL TEST SET (30% - hiç görülmemiş)
+    print(f"\n{'='*70}")
+    print("FINAL TEST SET RESULTS (30% of data - UNSEEN):")
+    print(f"{'='*70}")
+    
+    # Simple hybrid (test set)
+    hybrid_scores_test = best_alpha * vae_norm[test_idx] + (1 - best_alpha) * cnn_norm[test_idx]
+    hybrid_pred_simple_test = (hybrid_scores_test > best_threshold).astype(int)
+    
+    # Two-stage (test set) - DÜZELTİLDİ: cnn_probs_calibrated geçiliyor
+    hybrid_pred_two_stage_test, decision_types = two_stage_decision_strict(
+        vae_norm[test_idx], 
+        cnn_norm[test_idx],  # Normalized CNN logits
+        cnn_probs_calibrated[test_idx],  # Raw calibrated probs (high/low için)
+        best_threshold, 
+        best_alpha,
         high_conf_thresh=Config.CNN_HIGH_CONFIDENCE_THRESHOLD,
         low_conf_thresh=Config.CNN_LOW_CONFIDENCE_THRESHOLD
     )
     
-    # Results
-    print("\n" + "="*70)
-    print("SIMPLE HYBRID V4:")
-    print("="*70)
-    print(classification_report(labels, hybrid_pred_simple, target_names=['Benign', 'Malignant']))
+    print("\n--- Simple Hybrid V4 (Test Set) ---")
+    print(classification_report(labels[test_idx], hybrid_pred_simple_test, target_names=['Benign', 'Malignant']))
     
-    print("\n" + "="*70)
-    print("TWO-STAGE HYBRID V4 (Strict):")
-    print("="*70)
-    print(classification_report(labels, hybrid_pred_two_stage, target_names=['Benign', 'Malignant']))
+    print("\n--- Two-Stage Hybrid V4 (Test Set) ---")
+    print(classification_report(labels[test_idx], hybrid_pred_two_stage_test, target_names=['Benign', 'Malignant']))
     
     # Decision distribution
     decision_counts = {}
     for dt in set(decision_types):
         decision_counts[dt] = decision_types.count(dt)
     
-    print(f"\nDecision Type Distribution:")
+    print(f"\nDecision Type Distribution (Test Set):")
     for dt, count in decision_counts.items():
         print(f"  {dt}: {count} ({100*count/len(decision_types):.1f}%)")
     
-    print("\nConfusion Matrix (Two-Stage V4):")
-    print(confusion_matrix(labels, hybrid_pred_two_stage))
+    print("\nConfusion Matrix (Two-Stage Test Set):")
+    print(confusion_matrix(labels[test_idx], hybrid_pred_two_stage_test))
     
     print("\n✓ Hybrid V4 completed!")
+    print(f"\n{'='*70}")
+    print("FINAL CONFIGURATION:")
+    print(f"{'='*70}")
+    print(f"  Alpha: {best_alpha:.2f}")
+    print(f"  Threshold: {best_threshold:.4f}")
+    print(f"  Normalization: {Config.NORMALIZATION_METHOD}")
+    print(f"  CNN score method: {Config.CNN_SCORE_METHOD}")
+    print(f"  CNN High Conf: ≥{Config.CNN_HIGH_CONFIDENCE_THRESHOLD}")
+    print(f"  CNN Low Conf: ≤{Config.CNN_LOW_CONFIDENCE_THRESHOLD}")
 
 if __name__ == '__main__':
     main()
