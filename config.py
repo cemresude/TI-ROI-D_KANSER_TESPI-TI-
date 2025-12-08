@@ -28,13 +28,13 @@ class Config:
     
     # CNN Classifier - GÜÇLENDİRİLDİ
     CLASSIFIER_BACKBONE = 'resnet18'
-    CLASSIFIER_EPOCHS = 100  # 75'ten 100'e artırıldı
-    CLASSIFIER_LR = 0.0005
+    CLASSIFIER_EPOCHS = 75  # 75'ten 100'e artırıldı
+    CLASSIFIER_LR = 0.0003  # Daha düşük LR (0.0005'ten)
     WEIGHT_DECAY = 1e-4
     WARMUP_EPOCHS = 5
     
-    # CNN training - BENIGN LEHINE
-    BENIGN_CLASS_WEIGHT_MULTIPLIER = 1.3  # 1.0'dan 1.3'e artırıldı
+    # CNN training - BENIGN LEHİNE AĞIRLIK ARTIR
+    BENIGN_CLASS_WEIGHT_MULTIPLIER = 2.0  # 1.3'ten 2.0'a çık!
     USE_TEMPERATURE_SCALING = True  # YENİ: Temperature scaling ekle
     TEMPERATURE = 1.5  # YENİ: Softmax temperature
     
