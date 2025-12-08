@@ -6,26 +6,36 @@ from data_loader import get_dataloaders
 from config import Config
 
 def objective(trial):
-    # Random seed for reproducibility
     torch.manual_seed(42)
     
-    learning_rate = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
-    beta = trial.suggest_float("beta", 1e-6, 1e-2, log=True)
-    latent_dim = trial.suggest_categorical("latent_dim", [128, 256, 512])
+    # Genişletilmiş parametre arama uzayı
+    learning_rate = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
+    latent_dim = trial.suggest_categorical("latent_dim", [128, 256, 512, 768, 1024])
+    beta_start = trial.suggest_float("beta_start", 1e-7, 1e-3, log=True)
+    beta_end = trial.suggest_float("beta_end", 1e-5, 1e-2, log=True)
+    use_ssim = trial.suggest_categorical("use_ssim", [True, False])
+    ssim_weight = trial.suggest_float("ssim_weight", 0.2, 0.8) if use_ssim else 0.5
+    
+    # Optimizer seçimi
+    optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
+    weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True) if optimizer_name == "AdamW" else 0.0
     
     model = ConvVAE(latent_dim=latent_dim).to(Config.DEVICE)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    
+    if optimizer_name == "Adam":
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    else:
+        optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     
     try:
-        # Fix: get_dataloaders may return more than 2 values
         dataloaders = get_dataloaders(
             Config.DATA_DIR, 
             batch_size=32, 
             split_ratio=0.2, 
-            only_benign=True # Prevent worker crashes
+            only_benign=True,
+            use_weighted_sampler=False
         )
         
-        # Handle different return formats
         if len(dataloaders) == 2:
             train_loader, val_loader = dataloaders
         elif len(dataloaders) == 3:
@@ -40,16 +50,25 @@ def objective(trial):
         print(f"Dataloader hatası: {e}")
         raise optuna.TrialPruned()
     
-    # Küçük bir eğitim döngüsü (Örn: Sadece 5 Epoch)
-    for epoch in range(5):
+    num_epochs = 15  # Daha uzun trial
+    for epoch in range(num_epochs):
         try:
+            # Beta annealing
+            if epoch < 7:
+                current_beta = beta_start + (beta_end - beta_start) * (epoch / 7)
+            else:
+                current_beta = beta_end
+            
             model.train()
             train_loss = 0
             for images, _ in train_loader:
                 images = images.to(Config.DEVICE)
                 optimizer.zero_grad()
                 recon, mu, logvar = model(images)
-                loss, recon_loss, kl_loss = vae_loss(recon, images, mu, logvar, beta)
+                loss, recon_loss, kl_loss = vae_loss(
+                    recon, images, mu, logvar, current_beta, 
+                    use_ssim=use_ssim, ssim_weight=ssim_weight
+                )
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
@@ -62,13 +81,15 @@ def objective(trial):
                 for images, _ in val_loader:
                     images = images.to(Config.DEVICE)
                     recon, mu, logvar = model(images)
-                    loss, _, _ = vae_loss(recon, images, mu, logvar, beta)
+                    loss, _, _ = vae_loss(
+                        recon, images, mu, logvar, current_beta,
+                        use_ssim=use_ssim, ssim_weight=ssim_weight
+                    )
                     val_loss += loss.item()
                     num_batches += 1
             
             avg_val_loss = val_loss / num_batches if num_batches > 0 else val_loss
             
-            # Optuna'ya gidişatı bildir
             trial.report(avg_val_loss, epoch)
             if trial.should_prune():
                 raise optuna.TrialPruned()
@@ -89,11 +110,11 @@ if __name__ == '__main__':
         storage="sqlite:///optuna_study.db",
         direction="minimize",
         load_if_exists=True,  # Kesintiden devam edebilir
-        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=2)
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=5)
     )
 
-    print("Optimizasyon başlıyor... Arkanıza yaslanın.")
-    study.optimize(objective, n_trials=20, timeout=3600)  # 1 saat timeout
+    print("Gelişmiş Optimizasyon başlıyor...")
+    study.optimize(objective, n_trials=50, timeout=7200)  # 50 trial, 2 saat
 
     # 4. En iyi sonuçları yazdır (başarılı trial kontrolü)
     print("\n" + "="*50)

@@ -4,11 +4,12 @@ import torch.optim as optim
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 import os
+import numpy as np
 
 from classifier import ThyroidResNetClassifier
 from data_loader import get_dataloaders
 from config import Config
-from utils import set_seed, save_checkpoint
+from utils import set_seed
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 def train_epoch(model, train_loader, criterion, optimizer, scaler, device):
@@ -22,7 +23,6 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device):
         
         optimizer.zero_grad()
         
-        # Mixed precision training
         with autocast():
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -36,7 +36,6 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device):
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
     
-    # Metrics
     avg_loss = total_loss / len(train_loader)
     accuracy = accuracy_score(all_labels, all_preds)
     precision = precision_score(all_labels, all_preds, zero_division=0)
@@ -78,37 +77,81 @@ def main():
     print(f"Device: {Config.DEVICE}")
     print(f"Training CNN Classifier with {Config.CLASSIFIER_BACKBONE}")
     
-    # Hem benign hem malignant veriler (sınıf dengeli)
-    print("Loading BALANCED data (BENIGN + MALIGNANT)...")
-    train_loader, val_loader, train_size, val_size = get_dataloaders(
-        Config.DATA_DIR, 
-        Config.BATCH_SIZE, 
-        Config.SPLIT_RATIO,
-        only_benign=False,  # Her iki sınıf
-        use_weighted_sampler=True  # Sınıf dengeleme
-    )
+    print(f"\nChecking DATA_DIR: {Config.DATA_DIR}")
+    if not os.path.exists(Config.DATA_DIR):
+        print("ERROR: DATA_DIR does not exist!")
+        print("Please run organize_data.py first or update Config.DATA_DIR")
+        return
     
-    print(f"Training samples: {train_size}")
-    print(f"Validation samples: {val_size}")
+    benign_path = os.path.join(Config.DATA_DIR, 'benign')
+    malignant_path = os.path.join(Config.DATA_DIR, 'malignant')
     
-    # Model
+    print(f"  Benign folder exists: {os.path.exists(benign_path)}")
+    print(f"  Malignant folder exists: {os.path.exists(malignant_path)}")
+    
+    if os.path.exists(benign_path):
+        benign_files = [f for f in os.listdir(benign_path) 
+                       if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
+        print(f"  Benign images: {len(benign_files)}")
+    else:
+        print("  Benign folder not found!")
+    
+    if os.path.exists(malignant_path):
+        malignant_files = [f for f in os.listdir(malignant_path) 
+                          if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
+        print(f"  Malignant images: {len(malignant_files)}")
+    else:
+        print("  Malignant folder not found!")
+    
+    print("\nLoading BALANCED data (BENIGN + MALIGNANT)...")
+    
+    try:
+        train_loader, val_loader, train_size, val_size = get_dataloaders(
+            Config.DATA_DIR, 
+            Config.BATCH_SIZE, 
+            Config.SPLIT_RATIO,
+            only_benign=False,
+            use_weighted_sampler=True
+        )
+    except Exception as e:
+        print(f"\nERROR loading data: {e}")
+        print("\nPossible solutions:")
+        print("1. Run organize_data.py first")
+        print("2. Update Config.DATA_DIR to point to organized folder")
+        print("3. Check if images exist in benign and malignant folders")
+        return
+    
+    print("\nData loaded successfully!")
+    print(f"  Training samples: {train_size}")
+    print(f"  Validation samples: {val_size}")
+    
     model = ThyroidResNetClassifier(
         num_classes=2,
         backbone=Config.CLASSIFIER_BACKBONE,
         pretrained=True
     ).to(Config.DEVICE)
     
-    # Loss (class imbalance için weighted)
-    criterion = nn.CrossEntropyLoss()
+    print("\nComputing class weights...")
+    all_labels = []
+    for _, labels in train_loader:
+        all_labels.extend(labels.numpy())
     
-    # Optimizer (AdamW with weight decay)
+    class_counts = np.bincount(all_labels)
+    class_weights = 1.0 / class_counts
+    class_weights = class_weights / class_weights.sum()
+    class_weights[0] *= 1.2
+    class_weights = class_weights / class_weights.sum()
+    
+    print(f"Class weights: Benign={class_weights[0]:.3f}, Malignant={class_weights[1]:.3f}")
+    
+    criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights).to(Config.DEVICE))
+    
     optimizer = optim.AdamW(
         model.parameters(),
         lr=Config.CLASSIFIER_LR,
         weight_decay=Config.WEIGHT_DECAY
     )
     
-    # Cosine annealing with warmup
     warmup_epochs = Config.WARMUP_EPOCHS
     total_steps = len(train_loader) * Config.CLASSIFIER_EPOCHS
     warmup_steps = len(train_loader) * warmup_epochs
@@ -120,22 +163,23 @@ def main():
         return max(0.0, 0.5 * (1.0 + torch.cos(torch.tensor(progress * 3.141592653589793))))
     
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    
-    # Mixed precision scaler
     scaler = GradScaler()
     
-    # Checkpoint dir
     os.makedirs(Config.MODEL_SAVE_PATH, exist_ok=True)
     
     best_val_f1 = 0.0
     patience_counter = 0
     
     print(f"\nTraining with Cosine Annealing + Warmup ({warmup_epochs} epochs)")
-    print(f"Using Mixed Precision Training (AMP)\n")
+    print("Using Mixed Precision Training (AMP)\n")
+    
+    global_step = 0
     
     for epoch in range(Config.CLASSIFIER_EPOCHS):
         print(f'\nEpoch {epoch+1}/{Config.CLASSIFIER_EPOCHS}')
-        print(f"Learning Rate: {scheduler.get_last_lr()[0]:.6f}")
+        
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Learning Rate: {current_lr:.6f}")
         
         train_loss, train_acc, train_prec, train_rec, train_f1 = train_epoch(
             model, train_loader, criterion, optimizer, scaler, Config.DEVICE
@@ -145,14 +189,13 @@ def main():
             model, val_loader, criterion, Config.DEVICE
         )
         
-        print(f'Train - Loss: {train_loss:.4f} | Acc: {train_acc:.4f} | '
-              f'Prec: {train_prec:.4f} | Rec: {train_rec:.4f} | F1: {train_f1:.4f}')
-        print(f'Val   - Loss: {val_loss:.4f} | Acc: {val_acc:.4f} | '
-              f'Prec: {val_prec:.4f} | Rec: {val_rec:.4f} | F1: {val_f1:.4f}')
+        print(f'Train - Loss: {train_loss:.4f} | Acc: {train_acc:.4f} | Prec: {train_prec:.4f} | Rec: {train_rec:.4f} | F1: {train_f1:.4f}')
+        print(f'Val   - Loss: {val_loss:.4f} | Acc: {val_acc:.4f} | Prec: {val_prec:.4f} | Rec: {val_rec:.4f} | F1: {val_f1:.4f}')
         
-        scheduler.step()
+        for _ in range(len(train_loader)):
+            scheduler.step()
+            global_step += 1
         
-        # Save best model (based on F1 score)
         if val_f1 > best_val_f1 + Config.EARLY_STOPPING_DELTA:
             best_val_f1 = val_f1
             patience_counter = 0
@@ -165,7 +208,7 @@ def main():
                 'val_f1': val_f1,
                 'val_loss': val_loss
             }, checkpoint_path)
-            print(f'✓ Model saved! Best Val F1: {best_val_f1:.4f}')
+            print(f'Model saved! Best Val F1: {best_val_f1:.4f}')
         else:
             patience_counter += 1
             print(f'No improvement. Patience: {patience_counter}/{Config.EARLY_STOPPING_PATIENCE}')

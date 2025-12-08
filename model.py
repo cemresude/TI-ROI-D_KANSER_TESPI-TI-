@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pytorch_msssim import ssim
 
 class ThyroidCancerCNN(nn.Module):
     def __init__(self, num_classes=2):
@@ -149,15 +150,37 @@ class ConvVAE(nn.Module):
         recon_x = self.decode(z)
         return recon_x, mu, logvar
 
-def vae_loss(recon_x, x, mu, logvar, beta=1.0):
+def vae_loss(recon_x, x, mu, logvar, beta=1.0, use_ssim=True, ssim_weight=0.5):
     """
-    VAE Loss: Reconstruction Loss (MSE) + KL Divergence
-    beta: KL divergence'ın ağırlığı
-    """
-    # Reconstruction loss (MSE)
-    recon_loss = F.mse_loss(recon_x, x, reduction='sum')
+    VAE Loss: (MSE + SSIM) + beta * KL Divergence
     
-    # KL Divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+    Args:
+        recon_x: Reconstructed images
+        x: Original images
+        mu: Latent mean
+        logvar: Latent log variance
+        beta: KL divergence weight (for beta-VAE annealing)
+        use_ssim: Whether to use SSIM loss
+        ssim_weight: Weight for SSIM vs MSE (0.5 means 50-50)
+    """
+    batch_size = x.size(0)
+    
+    # Reconstruction loss
+    if use_ssim:
+        # MSE Loss
+        mse_loss = F.mse_loss(recon_x, x, reduction='sum')
+        
+        # SSIM Loss (1 - SSIM for minimization)
+        ssim_loss = (1 - ssim(recon_x, x, data_range=1.0, size_average=False)) * batch_size
+        
+        # Combined reconstruction loss
+        recon_loss = (1 - ssim_weight) * mse_loss + ssim_weight * ssim_loss
+    else:
+        recon_loss = F.mse_loss(recon_x, x, reduction='sum')
+    
+    # KL Divergence
     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     
-    return recon_loss + beta * kl_loss, recon_loss, kl_loss
+    total_loss = recon_loss + beta * kl_loss
+    
+    return total_loss, recon_loss, kl_loss
