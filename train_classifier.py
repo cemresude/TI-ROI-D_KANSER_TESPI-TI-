@@ -17,9 +17,11 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device):
     total_loss = 0
     all_preds = []
     all_labels = []
+    num_samples = 0
     
     for images, labels in tqdm(train_loader, desc='Training'):
         images, labels = images.to(device), labels.to(device)
+        batch_size = images.size(0)
         
         optimizer.zero_grad()
         
@@ -27,20 +29,26 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device):
             outputs = model(images)
             loss = criterion(outputs, labels)
         
-        # Loss must be scalar for backward
-        if not loss.requires_grad:
+        # Ensure loss is scalar
+        if loss.dim() != 0:
+            loss = loss.mean()
+        
+        if not torch.isfinite(loss):
+            print(f"Warning: Non-finite loss detected: {loss.item()}")
             continue
-            
+        
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
         
-        total_loss += loss.item() * images.size(0)  # Multiply by batch size
+        total_loss += loss.item() * batch_size
+        num_samples += batch_size
+        
         preds = outputs.argmax(dim=1)
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
     
-    avg_loss = total_loss / len(all_labels)  # Divide by total samples
+    avg_loss = total_loss / num_samples if num_samples > 0 else 0
     accuracy = accuracy_score(all_labels, all_preds)
     precision = precision_score(all_labels, all_preds, zero_division=0)
     recall = recall_score(all_labels, all_preds, zero_division=0)
@@ -53,21 +61,29 @@ def validate(model, val_loader, criterion, device):
     total_loss = 0
     all_preds = []
     all_labels = []
+    num_samples = 0
     
     with torch.no_grad():
         for images, labels in tqdm(val_loader, desc='Validation'):
             images, labels = images.to(device), labels.to(device)
+            batch_size = images.size(0)
             
             with autocast():
                 outputs = model(images)
                 loss = criterion(outputs, labels)
             
-            total_loss += loss.item() * images.size(0)  # Multiply by batch size
+            # Ensure loss is scalar
+            if loss.dim() != 0:
+                loss = loss.mean()
+            
+            total_loss += loss.item() * batch_size
+            num_samples += batch_size
+            
             preds = outputs.argmax(dim=1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
     
-    avg_loss = total_loss / len(all_labels)  # Divide by total samples
+    avg_loss = total_loss / num_samples if num_samples > 0 else 0
     accuracy = accuracy_score(all_labels, all_preds)
     precision = precision_score(all_labels, all_preds, zero_division=0)
     recall = recall_score(all_labels, all_preds, zero_division=0)
