@@ -27,16 +27,20 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device):
             outputs = model(images)
             loss = criterion(outputs, labels)
         
+        # Loss must be scalar for backward
+        if not loss.requires_grad:
+            continue
+            
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
         
-        total_loss += loss.item()
+        total_loss += loss.item() * images.size(0)  # Multiply by batch size
         preds = outputs.argmax(dim=1)
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy())
     
-    avg_loss = total_loss / len(train_loader)
+    avg_loss = total_loss / len(all_labels)  # Divide by total samples
     accuracy = accuracy_score(all_labels, all_preds)
     precision = precision_score(all_labels, all_preds, zero_division=0)
     recall = recall_score(all_labels, all_preds, zero_division=0)
@@ -58,12 +62,12 @@ def validate(model, val_loader, criterion, device):
                 outputs = model(images)
                 loss = criterion(outputs, labels)
             
-            total_loss += loss.item()
+            total_loss += loss.item() * images.size(0)  # Multiply by batch size
             preds = outputs.argmax(dim=1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
     
-    avg_loss = total_loss / len(val_loader)
+    avg_loss = total_loss / len(all_labels)  # Divide by total samples
     accuracy = accuracy_score(all_labels, all_preds)
     precision = precision_score(all_labels, all_preds, zero_division=0)
     recall = recall_score(all_labels, all_preds, zero_division=0)

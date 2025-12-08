@@ -1,118 +1,107 @@
-# Tiroid Kanseri Tespiti - ConvVAE Anomaly Detection
+# Tiroid Kanseri Tespiti - Deep Learning Projesi
 
-DDTI veri setini kullanarak Convolutional Variational Autoencoder (ConvVAE) ile tiroid kanseri anomali tespiti.
+Tiroid ultrasound görüntülerinden kanser tespiti için Hybrid Deep Learning yaklaşımı.
 
-## Yaklaşım
+## 🎯 Proje Özeti
 
-Model sadece **BENIGN** (normal) verilerle eğitilir. Test aşamasında, MALIGNANT (kanserli) veriler yüksek reconstruction error göstererek anomali olarak tespit edilir.
+- **VAE (Variational Autoencoder)**: Anomaly detection
+- **ResNet Classifier**: Binary classification (benign vs malignant)
+- **Hybrid System**: VAE + CNN fusion
 
-## Kurulum
+## 📊 Dataset
+
+DDTI (Digital Database of Thyroid Images)
+- Benign: ~X görüntü
+- Malignant: ~Y görüntü
+
+## 🚀 Kurulum
 
 ```bash
+# Repo'yu klonla
+git clone https://github.com/cemresude/tiroid-kanser-tespiti.git
+cd tiroid-kanser-tespiti
+
+# Virtual environment oluştur
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Gereksinimleri yükle
 pip install -r requirements.txt
 ```
 
-## Veri Hazırlama
+## 📁 Kullanım
 
-**ÖNEMLİ:** Eğitim öncesi veri setini organize etmelisiniz!
-
+### 1. Veriyi Organize Et
 ```bash
-# DDTI veri setini category.csv'ye göre organize et
 python organize_data.py
 ```
 
-Bu script:
-- `DDTI/image/` klasöründeki tüm görüntüleri okur
-- `category.csv` dosyasındaki kategorilere göre ayırır
-- `DDTI/organized/benign/` ve `DDTI/organized/malignant/` klasörlerine kaydeder
-
-## Kullanım
-
-### 1. Model Eğitimi (Sadece BENIGN verilerle)
+### 2. VAE Eğit
 ```bash
 python train.py
 ```
 
-### 2. Test (BENIGN + MALIGNANT verilerle)
+### 3. CNN Sınıflandırıcı Eğit
 ```bash
+python train_classifier.py
+```
+
+### 4. Test
+```bash
+# VAE testi
 python test.py
+
+# Hybrid sistem testi
+python hybrid_test.py
 ```
 
-## Model Özellikleri
-
-### Preprocessing
-- Görüntüler 128x128 boyutuna resize edilir
-- Dikdörtgen görüntüler için siyah padding eklenir (aspect ratio korunur)
-- Piksel değerleri 0-1 aralığında normalize edilir
-
-### ConvVAE Mimarisi
-**Encoder:**
-- Conv2D → BatchNorm → LeakyReLU (5 katman)
-- Latent space: mean (μ) ve log-variance (log σ²)
-
-**Reparameterization Trick:**
-```
-z = μ + σ * ε, ε ~ N(0, 1)
+### 5. Hyperparameter Optimization (Opsiyonel)
+```bash
+python optimize.py
 ```
 
-**Decoder:**
-- ConvTranspose2D → BatchNorm → LeakyReLU (5 katman)
-- Son katman: Sigmoid (0-1 çıktı)
+## 📈 Sonuçlar
 
-### Loss Fonksiyonu
-```
-Total Loss = MSE(x, x') + β * KL(q(z|x) || p(z))
-```
-- **MSE**: Reconstruction loss
-- **KL Divergence**: Latent space regularization
-- **β**: KL weight (default: 1.0)
+### VAE Anomaly Detection
+- ROC-AUC: X.XX
+- Benign Recall: X.XX
 
-## Test Metrikleri
+### CNN Classifier
+- Accuracy: X.XX
+- F1 Score: X.XX
 
-- Reconstruction Error distribution
-- ROC Curve ve AUC
-- Confusion Matrix
-- Classification Report
-- Görsel karşılaştırmalar
+### Hybrid System V2
+- Accuracy: X.XX
+- Benign Recall: X.XX (target: 0.95)
+- Macro F1: X.XX
 
-## Dosya Yapısı
-```
-TİROİD_KANSER_TESPİTİ/
-├── organize_data.py  # Veri organizasyon scripti
-├── model.py          # ConvVAE modeli
-├── data_loader.py    # Veri yükleme (padding, normalize)
-├── train.py          # Eğitim (sadece BENIGN)
-├── test.py           # Test (anomaly detection)
-├── config.py         # Konfigürasyon
-├── utils.py          # Yardımcı fonksiyonlar
-├── requirements.txt  # Gereksinimler
-└── checkpoints/      # Model kayıtları
-    ├── best_model_vae.pth
-    ├── reconstruction_comparison.png
-    ├── roc_curve.png
-    └── error_distribution.png
-```
+## 🔬 Metodoloji
 
-## DDTI Veri Seti Yapısı
+### İyileştirmeler
+✅ ImageNet normalizasyon  
+✅ Agresif augmentasyon (GaussianBlur, scale, ColorJitter)  
+✅ Beta annealing (0.0 → 0.001)  
+✅ SSIM + MSE hybrid loss  
+✅ WeightedRandomSampler  
+✅ Class weights (benign×1.2)  
+✅ Cosine annealing + warmup  
+✅ Mixed precision training (AMP)  
+✅ CNN calibration (Isotonic Regression)  
+✅ Hybrid score: α=0.75 (VAE lehine)  
+✅ Benign-optimized threshold
 
-**Orijinal:**
-```
-DDTI/
-├── image/
-│   ├── img001.jpg
-│   ├── img002.jpg
-│   └── ...
-└── category.csv
-```
+## 📚 Detaylı Dokümantasyon
 
-**Organize edilmiş (organize_data.py sonrası):**
-```
-DDTI/
-├── organized/
-│   ├── benign/
-│   │   ├── img001.jpg
-│   │   └── ...
-│   └── malignant/
-│       ├── img050.jpg
-│       └── ...
-```
+Detaylı dokümantasyon için [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) dosyasına bakın.
+
+## 👥 Katkıda Bulunma
+
+Pull request'ler memnuniyetle karşılanır!
+
+## 📄 Lisans
+
+MIT License
+
+## 📧 İletişim
+
+Cemre Sude Akdağ - [GitHub](https://github.com/cemresude)
