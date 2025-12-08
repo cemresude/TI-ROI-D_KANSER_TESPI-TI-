@@ -157,7 +157,7 @@ def main():
     class_counts = np.bincount(all_labels)
     class_weights = 1.0 / class_counts
     class_weights = class_weights / class_weights.sum()
-    class_weights[0] *= Config.BENIGN_CLASS_WEIGHT_MULTIPLIER  # 1.5x artırıldı
+    class_weights[0] *= Config.BENIGN_CLASS_WEIGHT_MULTIPLIER  # 1.3x
     class_weights = class_weights / class_weights.sum()
     
     print(f"Class weights: Benign={class_weights[0]:.3f}, Malignant={class_weights[1]:.3f}")
@@ -233,6 +233,31 @@ def main():
             if patience_counter >= Config.EARLY_STOPPING_PATIENCE:
                 print("Early stopping triggered.")
                 break
+    
+    # Temperature Scaling Calibration
+    if Config.USE_TEMPERATURE_SCALING:
+        print("\n" + "="*60)
+        print("Applying Temperature Scaling Calibration...")
+        print("="*60)
+        
+        from classifier import TemperatureScaling
+        
+        # Wrap the model with temperature scaling
+        scaled_model = TemperatureScaling(model, temperature=Config.TEMPERATURE).to(Config.DEVICE)
+        
+        # Find optimal temperature using validation set
+        optimal_temp = scaled_model.set_temperature(val_loader, Config.DEVICE)
+        print(f"Optimal temperature: {optimal_temp:.4f}")
+        
+        # Save the calibrated model
+        checkpoint_path = os.path.join(Config.MODEL_SAVE_PATH, 'best_classifier_calibrated.pth')
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'temperature': optimal_temp,
+            'val_f1': best_val_f1
+        }, checkpoint_path)
+        print(f"Temperature-scaled model saved: {checkpoint_path}")
     
     print("\nTraining completed!")
     print(f"Best Validation F1 Score: {best_val_f1:.4f}")

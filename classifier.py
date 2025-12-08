@@ -3,6 +3,7 @@ import torch.nn as nn
 import torchvision.models as models
 import numpy as np
 import cv2
+from optuna import optim
 
 class ThyroidResNetClassifier(nn.Module):
     """
@@ -69,6 +70,53 @@ class ThyroidResNetClassifier(nn.Module):
     
     def get_activations(self):
         return self.feature_layers
+
+class TemperatureScaling(nn.Module):
+    """
+    Temperature scaling for probability calibration
+    https://arxiv.org/abs/1706.04599
+    """
+    def __init__(self, model, temperature=1.5):
+        super(TemperatureScaling, self).__init__()
+        self.model = model
+        self.temperature = nn.Parameter(torch.ones(1) * temperature)
+    
+    def forward(self, x):
+        logits = self.model(x)
+        return logits / self.temperature
+    
+    def set_temperature(self, valid_loader, device):
+        """
+        Validation set ile optimal temperature bul
+        """
+        nll_criterion = nn.CrossEntropyLoss()
+        
+        logits_list = []
+        labels_list = []
+        
+        self.model.eval()
+        with torch.no_grad():
+            for images, labels in valid_loader:
+                images = images.to(device)
+                logits = self.model(images)
+                logits_list.append(logits)
+                labels_list.append(labels)
+        
+        logits = torch.cat(logits_list).to(device)
+        labels = torch.cat(labels_list).to(device)
+        
+        # Optimize temperature
+        optimizer = optim.LBFGS([self.temperature], lr=0.01, max_iter=50)
+        
+        def eval():
+            optimizer.zero_grad()
+            loss = nll_criterion(logits / self.temperature, labels)
+            loss.backward()
+            return loss
+        
+        optimizer.step(eval)
+        
+        return self.temperature.item()
 
 class GradCAM:
     """
