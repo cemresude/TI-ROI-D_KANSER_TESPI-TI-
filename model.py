@@ -60,78 +60,78 @@ class ConvVAE(nn.Module):
         super(ConvVAE, self).__init__()
         self.latent_dim = latent_dim
         
-        # Encoder
+        # Encoder - 224x224 için güncellenmiş
         self.encoder = nn.Sequential(
-            # 128x128x3 -> 64x64x32
+            # 224x224x3 -> 112x112x32
             nn.Conv2d(3, 32, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(32),
             nn.LeakyReLU(0.2),
             
-            # 64x64x32 -> 32x32x64
+            # 112x112x32 -> 56x56x64
             nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2),
             
-            # 32x32x64 -> 16x16x128
+            # 56x56x64 -> 28x28x128
             nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2),
             
-            # 16x16x128 -> 8x8x256
+            # 28x28x128 -> 14x14x256
             nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2),
             
-            # 8x8x256 -> 4x4x512
+            # 14x14x256 -> 7x7x512
             nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2),
         )
         
-        # Latent space (mean ve variance)
-        self.fc_mu = nn.Linear(512 * 4 * 4, latent_dim)
-        self.fc_logvar = nn.Linear(512 * 4 * 4, latent_dim)
+        # 7x7x512 = 25088 (doğru!)
+        self.fc_mu = nn.Linear(512 * 7 * 7, latent_dim)
+        self.fc_logvar = nn.Linear(512 * 7 * 7, latent_dim)
         
         # Decoder input
-        self.decoder_input = nn.Linear(latent_dim, 512 * 4 * 4)
+        self.decoder_input = nn.Linear(latent_dim, 512 * 7 * 7)
         
-        # Decoder
+        # Decoder - 224x224 için güncellenmiş
         self.decoder = nn.Sequential(
-            # 4x4x512 -> 8x8x256
+            # 7x7x512 -> 14x14x256
             nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2),
             
-            # 8x8x256 -> 16x16x128
+            # 14x14x256 -> 28x28x128
             nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2),
             
-            # 16x16x128 -> 32x32x64
+            # 28x28x128 -> 56x56x64
             nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2),
             
-            # 32x32x64 -> 64x64x32
+            # 56x56x64 -> 112x112x32
             nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(32),
             nn.LeakyReLU(0.2),
             
-            # 64x64x32 -> 128x128x3
+            # 112x112x32 -> 224x224x3
             nn.ConvTranspose2d(32, 3, kernel_size=4, stride=2, padding=1),
-            nn.Sigmoid()  # 0-1 aralığında çıktı
+            nn.Sigmoid()
         )
         
     def encode(self, x):
         """Encoder: görüntüden latent parametrelere"""
         x = self.encoder(x)
-        x = x.view(x.size(0), -1)
+        x = x.view(x.size(0), -1)  # [batch, 512*7*7] = [batch, 25088]
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
         return mu, logvar
     
     def reparameterize(self, mu, logvar):
-        """Reparameterization trick: z = mu + sigma * epsilon"""
+        """Reparameterization trick"""
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
@@ -139,7 +139,7 @@ class ConvVAE(nn.Module):
     def decode(self, z):
         """Decoder: latent space'den görüntüye"""
         x = self.decoder_input(z)
-        x = x.view(x.size(0), 512, 4, 4)
+        x = x.view(x.size(0), 512, 7, 7)  # [batch, 512, 7, 7]
         x = self.decoder(x)
         return x
     
