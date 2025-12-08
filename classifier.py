@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+import torch.optim as optim
 import numpy as np
 import cv2
-from optuna import optim
+
 
 class ThyroidResNetClassifier(nn.Module):
     """
