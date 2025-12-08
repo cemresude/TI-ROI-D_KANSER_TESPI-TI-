@@ -4,8 +4,11 @@ from sklearn.metrics import classification_report, confusion_matrix, roc_curve, 
 import matplotlib.pyplot as plt
 import os
 import sys
-sys.path.append('/Users/cemresudeakdag/TİROİD_KANSER_TESPİTİ')
 
+# FIX: Doğru path'i ekle
+sys.path.insert(0, '/Users/cemresudeakdag/TİROİD_KANSER_TESPİTİ')
+
+# Import local modules
 from classifier import ThyroidResNetClassifier
 from data_loader import get_test_loader
 from config import Config
