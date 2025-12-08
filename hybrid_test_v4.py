@@ -93,17 +93,25 @@ def grid_search_with_constraint(vae_norm, cnn_norm, labels, alpha_range,
         for threshold in thresholds:
             predictions = (hybrid_scores > threshold).astype(int)
             
-            # Malignant recall (CONSTRAINT 1)
+            # Malignant recall (CONSTRAINT 1) - DÜZELTİLDİ
             malignant_mask = labels == 1
             if np.sum(malignant_mask) == 0:
                 continue
-            malignant_recall = recall_score(labels[malignant_mask], predictions[malignant_mask], zero_division=0)
             
-            # Benign recall (CONSTRAINT 2)
+            # FIX: Sadece malignant sample'ları al
+            malignant_labels = labels[malignant_mask]
+            malignant_preds = predictions[malignant_mask]
+            malignant_recall = recall_score(malignant_labels, malignant_preds, zero_division=0)
+            
+            # Benign recall (CONSTRAINT 2) - DÜZELTİLDİ
             benign_mask = labels == 0
             if np.sum(benign_mask) == 0:
                 continue
-            benign_recall = recall_score(benign_mask, predictions == 0, zero_division=0)
+            
+            # FIX: Sadece benign sample'ları al
+            benign_labels = labels[benign_mask]
+            benign_preds = predictions[benign_mask]
+            benign_recall = recall_score(benign_labels, benign_preds, zero_division=0)
             
             # DUAL CONSTRAINT CHECK
             if malignant_recall < target_malignant_recall:
@@ -147,18 +155,32 @@ def grid_search_with_constraint(vae_norm, cnn_norm, labels, alpha_range,
                 'benign_recall': benign_recall
             })
     
-    # FALLBACK: Eğer constraint sağlanamazsa
+    # FALLBACK: Eğer constraint sağlanamazsa - DÜZELTİLDİ
     if best_alpha is None:
         print("\n⚠️  Dual constraint sağlanamadı! Relaxing constraints...")
-        # Benign recall constraint'ini gevşet
+        
         for alpha in alpha_range:
             hybrid_scores = alpha * vae_norm + (1 - alpha) * cnn_norm
             thresholds = np.percentile(hybrid_scores, np.linspace(10, 98, 250))
             
             for threshold in thresholds:
                 predictions = (hybrid_scores > threshold).astype(int)
-                malignant_recall = recall_score(labels == 1, predictions[labels == 1], zero_division=0)
-                benign_recall = recall_score(labels == 0, predictions == 0, zero_division=0)
+                
+                # FIX: Correct recall computation
+                malignant_mask = labels == 1
+                benign_mask = labels == 0
+                
+                malignant_recall = recall_score(
+                    labels[malignant_mask], 
+                    predictions[malignant_mask], 
+                    zero_division=0
+                )
+                
+                benign_recall = recall_score(
+                    labels[benign_mask], 
+                    predictions[benign_mask], 
+                    zero_division=0
+                )
                 
                 # Sadece malignant constraint
                 if malignant_recall >= target_malignant_recall:
@@ -167,6 +189,23 @@ def grid_search_with_constraint(vae_norm, cnn_norm, labels, alpha_range,
                         best_score = score
                         best_alpha = alpha
                         best_threshold = threshold
+                        
+                        # Best metrics oluştur
+                        benign_precision = np.sum((predictions == 0) & (labels == 0)) / np.sum(predictions == 0) if np.sum(predictions == 0) > 0 else 0
+                        malignant_precision = np.sum((predictions == 1) & (labels == 1)) / np.sum(predictions == 1) if np.sum(predictions == 1) > 0 else 0
+                        
+                        best_metrics = {
+                            'alpha': alpha,
+                            'threshold': threshold,
+                            'optimization_score': score,
+                            'malignant_recall': malignant_recall,
+                            'malignant_precision': malignant_precision,
+                            'benign_recall': benign_recall,
+                            'benign_precision': benign_precision,
+                            'macro_f1': f1_score(labels, predictions, average='macro', zero_division=0),
+                            'balanced_accuracy': score
+                        }
+                        
                         print(f"  Relaxed: alpha={alpha:.2f}, thresh={threshold:.4f}, mal_recall={malignant_recall:.3f}, ben_recall={benign_recall:.3f}")
     
     if verbose and best_metrics:
