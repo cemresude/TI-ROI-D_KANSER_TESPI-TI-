@@ -1,0 +1,815 @@
+\documentclass[12pt,a4paper,oneside]{report}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[turkish,english]{babel}
+\usepackage[T1]{fontenc}
+\usepackage[left=3cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=cyan,
+    pdftitle={Tiroid Kanseri Tespiti - Final Rapor},
+    pdfauthor={Cemre Sude Akdağ},
+}
+
+% Custom colors for results
+\definecolor{successgreen}{RGB}{34,139,34}
+\definecolor{warningorange}{RGB}{255,140,0}
+\definecolor{errorred}{RGB}{220,20,60}
+
+\title{
+    \textbf{TİROİD KANSERİ TESPİTİ PROJESİ}\\
+    \large Deep Learning ile Ultrasound Görüntü Analizi\\
+    \vspace{0.5cm}
+    \large Final Proje Raporu\\
+    \normalsize (Tüm Deneysel Sonuçlar ve Analiz)
+}
+\author{Cemre Sude Akdağ}
+\date{Aralık 2024}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Bu rapor, tiroid ultrasound görüntülerinden kanser tespiti için geliştirilen Hybrid Deep Learning sisteminin detaylı analizi ve tüm deneysel sonuçlarını içermektedir. Proje kapsamında Variational Autoencoder (VAE) ve ResNet tabanlı CNN sınıflandırıcı geliştirilmiş, çeşitli fusion stratejileri denenmiş ve kapsamlı performans analizleri yapılmıştır. Çalışma sonunda VAE anomaly detection (ROC-AUC: 0.55), Hybrid System V2 (Accuracy: 0.48), Hybrid System V3 (Accuracy: 0.62), ve Hybrid System V4 (Accuracy: 0.59) gibi farklı yaklaşımların performansları karşılaştırılmış, karşılaşılan zorluklar ve çözüm önerileri detaylı olarak raporlanmıştır.
+
+\textbf{Anahtar Kelimeler:} Tiroid Kanseri, Deep Learning, VAE, ResNet, Hybrid System, Medical Image Analysis, Anomaly Detection
+\end{abstract}
+
+\tableofcontents
+\listoftables
+\listoffigures
+
+\chapter{Giriş ve Motivasyon}
+
+\section{Problem Tanımı}
+
+Tiroid kanseri, dünyada en yaygın endokrin sistem kanseridir. Erken teşhis edilen vakalarda tedavi başarı oranı \%95'in üzerindedir. Ancak, ultrasound görüntülerinden manuel kanser tespitinde:
+
+\begin{itemize}
+    \item \textbf{Yorucu ve Zaman Alıcı:} Radyologlar günde yüzlerce görüntüyü analiz eder
+    \item \textbf{Subjektif Değerlendirme:} Tanı, uzman deneyimine bağımlıdır
+    \item \textbf{False Negative Riski:} Kanser kaçırılması kritik bir sorundur
+    \item \textbf{Sınıf Dengesizliği:} Benign vakaların sayısı malignant'tan çok fazladır (4:1)
+\end{itemize}
+
+\section{Proje Hedefleri}
+
+\begin{enumerate}
+    \item Otomatik tiroid kanseri tespit sistemi geliştirmek
+    \item \%90+ accuracy hedeflemek
+    \item False negative oranını minimize etmek
+    \item Açıklanabilir AI (Grad-CAM) ile klinik güven sağlamak
+    \item Farklı deep learning yaklaşımlarını karşılaştırmak
+\end{enumerate}
+
+\chapter{Dataset ve Veri Hazırlama}
+
+\section{DDTI Dataset}
+
+\textbf{Digital Database of Thyroid Images (DDTI)}
+
+\begin{table}[h]
+\centering
+\caption{Dataset İstatistikleri}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Sınıf} & \textbf{Train} & \textbf{Val} & \textbf{Test} & \textbf{Toplam} \\
+\midrule
+Benign & 640 & 160 & 260 & 1060 \\
+Malignant & 160 & 40 & 377 & 577 \\
+\midrule
+\textbf{Toplam} & \textbf{800} & \textbf{200} & \textbf{637} & \textbf{1637} \\
+\textbf{Oran} & 80\% & 20\% & - & - \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Class Imbalance}
+
+\textbf{İmbalance Ratio:} 4:1 (Benign:Malignant)
+
+\textbf{Çözümler:}
+\begin{itemize}
+    \item WeightedRandomSampler (training'de)
+    \item Class weights in loss function
+    \item Benign class weight multiplier: 1.3-2.0
+\end{itemize}
+
+\section{Data Augmentation}
+
+\begin{table}[h]
+\centering
+\caption{Augmentation Parametreleri}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Augmentation} & \textbf{Parametre} & \textbf{Probability} \\
+\midrule
+Horizontal Flip & - & 0.6 \\
+Vertical Flip & - & 0.5 \\
+Rotation & $\pm 30°$ & 1.0 \\
+Translation & $\pm 20\%$ & 1.0 \\
+Scale & 85\%-115\% & 1.0 \\
+Brightness & $\pm 40\%$ & 1.0 \\
+Contrast & $\pm 40\%$ & 1.0 \\
+Gaussian Blur & kernel=5 & 0.3 \\
+Random Erasing & scale=(0.02,0.1) & 0.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\chapter{Model Mimarileri}
+
+\section{VAE (Variational Autoencoder)}
+
+\subsection{Mimari Detayları}
+
+\textbf{Encoder:}
+\begin{itemize}
+    \item Input: $224 \times 224 \times 3$
+    \item 5 Convolutional layers (stride=2)
+    \item Output: $7 \times 7 \times 512 = 25088$ features
+    \item Latent space: $256$ dimensions (98x compression)
+\end{itemize}
+
+\textbf{Decoder:}
+\begin{itemize}
+    \item Input: $256$ latent dimensions
+    \item 5 Deconvolutional layers (stride=2)
+    \item Output: $224 \times 224 \times 3$ (Sigmoid activation)
+\end{itemize}
+
+\subsection{Loss Function}
+
+\begin{equation}
+\mathcal{L}_{\text{VAE}} = \underbrace{(0.30 \cdot \text{MSE} + 0.35 \cdot \text{MAE} + 0.35 \cdot (1-\text{SSIM}))}_{\text{Reconstruction Loss}} + \underbrace{\beta \cdot D_{\text{KL}}}_{\text{Regularization}}
+\end{equation}
+
+\textbf{Beta Annealing:}
+\begin{itemize}
+    \item $\beta_{\text{start}} = 0.0$
+    \item $\beta_{\text{end}} = 0.001$
+    \item Warmup: 40 epochs (linear increase)
+\end{itemize}
+
+\subsection{Training Details}
+
+\begin{itemize}
+    \item Optimizer: Adam (lr=0.0001)
+    \item Batch size: 16 (224x224 için)
+    \item Epochs: 100
+    \item Early stopping: patience=25
+    \item \textbf{Training data: Benign only (anomaly detection)}
+\end{itemize}
+
+\section{CNN Classifier (ResNet18)}
+
+\subsection{Mimari}
+
+\begin{itemize}
+    \item Backbone: ResNet18 (ImageNet pretrained)
+    \item Custom head: FC(512→256) + Dropout(0.5) + FC(256→2)
+    \item Transfer learning: Fine-tuning (all layers)
+\end{itemize}
+
+\subsection{Training Strategy}
+
+\begin{itemize}
+    \item Optimizer: AdamW (lr=0.0003, weight\_decay=1e-4)
+    \item LR Schedule: Cosine annealing + warmup (5 epochs)
+    \item Mixed Precision Training (AMP)
+    \item Class weights: Benign×2.0, Malignant×1.0
+    \item Epochs: 75
+    \item Early stopping: patience=25
+\end{itemize}
+
+\chapter{Deneysel Sonuçlar - Detaylı Analiz}
+
+\section{VAE Anomaly Detection Sonuçları}
+
+\subsection{Performans Metrikleri}
+
+\begin{table}[H]
+\centering
+\caption{VAE Test Sonuçları}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{Value} & \textbf{Target} \\
+\midrule
+ROC-AUC & \textcolor{errorred}{0.5516} & >0.80 \\
+Accuracy & \textcolor{errorred}{0.56} & >0.85 \\
+\midrule
+Benign Precision & 0.47 & >0.70 \\
+Benign Recall & 0.55 & >0.80 \\
+Benign F1-Score & 0.50 & >0.75 \\
+\midrule
+Malignant Precision & 0.65 & >0.70 \\
+Malignant Recall & 0.57 & >0.85 \\
+Malignant F1-Score & 0.61 & >0.75 \\
+\midrule
+Macro Avg F1 & \textcolor{errorred}{0.55} & >0.75 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Reconstruction Error Analizi}
+
+\begin{table}[H]
+\centering
+\caption{VAE Reconstruction Error İstatistikleri}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Class} & \textbf{Mean Error} & \textbf{Std Dev} & \textbf{Difference} \\
+\midrule
+Benign & 2.607210 & 0.350772 & - \\
+Malignant & 2.669879 & 0.344153 & \textcolor{errorred}{+0.062669} \\
+\midrule
+\textbf{Separation} & \multicolumn{3}{c}{\textcolor{errorred}{ÇOK DÜŞÜK (0.17 std)}} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Optimal Threshold:} 2.663476
+
+\subsection{Confusion Matrix}
+
+\begin{table}[H]
+\centering
+\caption{VAE Confusion Matrix}
+\begin{tabular}{cc|cc}
+\toprule
+ &  & \multicolumn{2}{c}{\textbf{Predicted}} \\
+ &  & Benign & Malignant \\
+\midrule
+\multirow{2}{*}{\textbf{Actual}} & Benign & \textcolor{successgreen}{142} & \textcolor{errorred}{118} \\
+ & Malignant & \textcolor{errorred}{162} & \textcolor{warningorange}{215} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{False Negatives:} 162 (Malignant kaçırıldı - \%43 oranı!)
+
+\subsection{VAE Başarısızlık Analizi}
+
+\textbf{Sorunlar:}
+\begin{enumerate}
+    \item \textcolor{errorred}{Benign ve Malignant reconstruction error'ları neredeyse aynı}
+    \item Distribution overlap çok yüksek (0.17 std separation)
+    \item VAE, normal dokuyu iyi öğrenememiş
+    \item Anomaly score'lar discriminative değil
+\end{enumerate}
+
+\textbf{Olası Nedenler:}
+\begin{itemize}
+    \item Dataset çok küçük (sadece 640 benign training sample)
+    \item Ultrasound görüntüleri doğası gereği noisy
+    \item Benign ve malignant dokular görsel olarak çok benzer
+    \item VAE architecture complexity yetersiz olabilir
+\end{itemize}
+
+\section{Hybrid System V2 Sonuçları}
+
+\subsection{Konfigürasyon}
+
+\begin{itemize}
+    \item Alpha (VAE weight): 0.75 (VAE dominant)
+    \item CNN Calibration: Isotonic Regression
+    \item Target: Benign recall ≥ 0.95
+\end{itemize}
+
+\subsection{Performans}
+
+\begin{table}[H]
+\centering
+\caption{Hybrid V2 Test Sonuçları}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Benign} & \textbf{Malignant} & \textbf{Overall} \\
+\midrule
+Precision & 0.44 & 0.82 & - \\
+Recall & \textcolor{successgreen}{0.95} & \textcolor{errorred}{0.16} & - \\
+F1-Score & 0.60 & 0.26 & - \\
+\midrule
+Accuracy & - & - & \textcolor{errorred}{0.48} \\
+Macro F1 & - & - & \textcolor{errorred}{0.43} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Confusion Matrix}
+
+\begin{table}[H]
+\centering
+\caption{Hybrid V2 Confusion Matrix}
+\begin{tabular}{cc|cc}
+\toprule
+ &  & \multicolumn{2}{c}{\textbf{Predicted}} \\
+ &  & Benign & Malignant \\
+\midrule
+\multirow{2}{*}{\textbf{Actual}} & Benign & \textcolor{successgreen}{247} & \textcolor{warningorange}{13} \\
+ & Malignant & \textcolor{errorred}{318} & \textcolor{errorred}{59} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{MAJOR PROBLEM:} 318 malignant case kaçırıldı (\%84 False Negative Rate!)
+
+\subsection{Hybrid V2 Başarısızlık Analizi}
+
+\textbf{Kritik Sorunlar:}
+\begin{enumerate}
+    \item \textcolor{errorred}{Alpha=0.75 çok yüksek} → VAE'ye fazla ağırlık verildi
+    \item VAE zaten kötü performans gösteriyordu (ROC-AUC: 0.55)
+    \item Benign recall'ı optimize ederken malignant recall feda edildi
+    \item \textcolor{errorred}{318/377 malignant case kaçırıldı - KLİNİK AÇIDAN KABUL EDİLEMEZ}
+\end{enumerate}
+
+\section{Hybrid System V3 Sonuçları (Grid-Search)}
+
+\subsection{Konfigürasyon}
+
+\begin{itemize}
+    \item Alpha range: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+    \item Threshold range: 5-95 percentile (200 points)
+    \item Target: Malignant recall ≥ 0.75 (relaxed from 0.85)
+    \item Optimization metric: F1-score
+    \item Normalization: Validation-based z-score
+\end{itemize}
+
+\subsection{Grid-Search Sonucu}
+
+\textbf{Best Configuration:}
+\begin{itemize}
+    \item Alpha: 0.30 (CNN dominant)
+    \item Threshold: -0.9208
+\end{itemize}
+
+\subsection{Simple Hybrid V3 Performansı}
+
+\begin{table}[H]
+\centering
+\caption{Hybrid V3 (Simple) Test Sonuçları}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Benign} & \textbf{Malignant} & \textbf{Overall} \\
+\midrule
+Precision & 0.62 & 0.60 & - \\
+Recall & 0.07 & 0.97 & - \\
+F1-Score & 0.12 & 0.74 & - \\
+\midrule
+Accuracy & - & - & 0.60 \\
+Macro F1 & - & - & 0.43 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Two-Stage Hybrid V3 Performansı}
+
+\textbf{Two-Stage Thresholds:}
+\begin{itemize}
+    \item CNN High Confidence: ≥0.7 → Malignant
+    \item CNN Low Confidence: ≤0.3 → Benign
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Hybrid V3 (Two-Stage) Test Sonuçları}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Benign} & \textbf{Malignant} & \textbf{Overall} \\
+\midrule
+Precision & 1.00 & 0.59 & - \\
+Recall & \textcolor{errorred}{0.01} & 1.00 & - \\
+F1-Score & 0.02 & 0.75 & - \\
+\midrule
+Accuracy & - & - & 0.59 \\
+Macro F1 & - & - & 0.38 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Decision Type Distribution}
+
+\begin{table}[H]
+\centering
+\caption{Two-Stage Decision Breakdown}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Decision Type} & \textbf{Count} & \textbf{Percentage} \\
+\midrule
+CNN High Conf (Malignant) & 91 & 14.3\% \\
+CNN Low Conf (Benign) & 2 & 0.3\% \\
+Hybrid & 544 & 85.4\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Confusion Matrix (Two-Stage V3)}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cc|cc}
+\toprule
+ &  & \multicolumn{2}{c}{\textbf{Predicted}} \\
+ &  & Benign & Malignant \\
+\midrule
+\multirow{2}{*}{\textbf{Actual}} & Benign & \textcolor{errorred}{2} & \textcolor{errorred}{258} \\
+ & Malignant & 0 & \textcolor{successgreen}{377} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{CATASTROPHIC FAILURE:} 258/260 benign case yanlış sınıflandırıldı!
+
+\section{Hybrid System V4 Sonuçları (Final Attempt)}
+
+\subsection{İyileştirmeler}
+
+\begin{enumerate}
+    \item \textbf{Benign-only validation normalization:} Sadece benign validation samples ile normalize
+    \item \textbf{Logit transformation:} CNN probabilities → logit(p) = log(p/(1-p))
+    \item \textbf{Dual constraint:} Malignant recall ≥0.85 AND Benign recall ≥0.70
+    \item \textbf{Stricter two-stage:} High=0.85, Low=0.50
+    \item \textbf{Train/test split:} 70\% grid-search, 30\% final test (data leakage prevention)
+\end{enumerate}
+
+\subsection{Grid-Search Sonuçları}
+
+\textbf{Best Configuration (70\% grid-search set):}
+\begin{itemize}
+    \item Alpha: 0.25
+    \item Threshold: -0.3789
+    \item Balanced Accuracy: 0.5526
+    \item Malignant Recall: \textcolor{successgreen}{0.9240} ✓
+    \item Benign Recall: \textcolor{errorred}{0.0000} ✗
+\end{itemize}
+
+\subsection{Final Test Set (30\% - Unseen Data)}
+
+\textbf{Simple Hybrid V4:}
+
+\begin{table}[H]
+\centering
+\caption{Hybrid V4 Simple - Final Test Results}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Benign} & \textbf{Malignant} & \textbf{Overall} \\
+\midrule
+Precision & 0.50 & 0.61 & - \\
+Recall & 0.18 & 0.88 & - \\
+F1-Score & 0.26 & 0.72 & - \\
+\midrule
+Accuracy & - & - & 0.59 \\
+Macro F1 & - & - & 0.49 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Two-Stage Hybrid V4:}
+
+\begin{table}[H]
+\centering
+\caption{Hybrid V4 Two-Stage - Final Test Results}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Benign} & \textbf{Malignant} & \textbf{Overall} \\
+\midrule
+Precision & 0.50 & 0.61 & - \\
+Recall & \textcolor{errorred}{0.21} & 0.86 & - \\
+F1-Score & 0.29 & 0.72 & - \\
+\midrule
+Accuracy & - & - & 0.59 \\
+Macro F1 & - & - & 0.50 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Final Confusion Matrix (Two-Stage V4)}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cc|cc}
+\toprule
+ &  & \multicolumn{2}{c}{\textbf{Predicted}} \\
+ &  & Benign & Malignant \\
+\midrule
+\multirow{2}{*}{\textbf{Actual}} & Benign & \textcolor{errorred}{16} & \textcolor{errorred}{62} \\
+ & Malignant & \textcolor{warningorange}{16} & \textcolor{successgreen}{98} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{62/78 benign cases yanlış (Benign Recall: sadece \%21!)}
+
+\chapter{Karşılaştırmalı Analiz}
+
+\section{Tüm Modellerin Performans Karşılaştırması}
+
+\begin{table}[H]
+\centering
+\caption{Final Model Comparison}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Model} & \textbf{Acc} & \textbf{Ben-Rec} & \textbf{Mal-Rec} & \textbf{F1} & \textbf{Status} \\
+\midrule
+VAE Only & 0.56 & 0.55 & 0.57 & 0.55 & \textcolor{errorred}{FAIL} \\
+Hybrid V2 & 0.48 & \textcolor{successgreen}{0.95} & \textcolor{errorred}{0.16} & 0.43 & \textcolor{errorred}{FAIL} \\
+Hybrid V3 (Simple) & 0.60 & \textcolor{errorred}{0.07} & \textcolor{successgreen}{0.97} & 0.43 & \textcolor{errorred}{FAIL} \\
+Hybrid V3 (2-Stage) & 0.59 & \textcolor{errorred}{0.01} & 1.00 & 0.38 & \textcolor{errorred}{FAIL} \\
+Hybrid V4 (Simple) & 0.59 & 0.18 & 0.88 & 0.49 & \textcolor{errorred}{FAIL} \\
+Hybrid V4 (2-Stage) & 0.59 & \textcolor{errorred}{0.21} & 0.86 & 0.50 & \textcolor{errorred}{FAIL} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{False Negative/Positive Analizi}
+
+\begin{table}[H]
+\centering
+\caption{False Negative \& False Positive Counts}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{False Negative} & \textbf{False Positive} & \textbf{Worse} \\
+ & (Kanser kaçırma) & (Yanlış alarm) & \\
+\midrule
+VAE Only & 162 (43\%) & 118 & \textcolor{errorred}{FN} \\
+Hybrid V2 & \textcolor{errorred}{318 (84\%)} & 13 & \textcolor{errorred}{FN!!} \\
+Hybrid V3 (2-Stage) & 0 & \textcolor{errorred}{258 (99\%)} & \textcolor{errorred}{FP!!} \\
+Hybrid V4 (2-Stage) & 16 (14\%) & \textcolor{errorred}{62 (79\%)} & \textcolor{errorred}{FP} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Trade-off Problem:} Benign recall artırınca malignant recall düşüyor, vice versa!
+
+\chapter{Sorun Analizi ve Lessons Learned}
+
+\section{VAE Başarısızlığının Nedenleri}
+
+\subsection{Temel Sorunlar}
+
+\begin{enumerate}
+    \item \textbf{Insufficient Data:} 640 benign training sample VAE için çok az
+    \item \textbf{Visual Similarity:} Benign ve malignant dokular ultrasound'da çok benzer görünüyor
+    \item \textbf{Noise in Ultrasound:} Ultrasound görüntüleri doğası gereği çok noisy
+    \item \textbf{Reconstruction Error Overlap:} Mean separation sadece 0.062 (0.17 std)
+\end{enumerate}
+
+\subsection{Denenen Çözümler (Başarısız)}
+
+\begin{itemize}
+    \item Beta annealing (0.0 → 0.001): ✗ Yeterli olmadı
+    \item SSIM + MAE + MSE hybrid loss: ✗ Separation artmadı
+    \item Latent dimension tuning (256): ✗ Etkisiz
+    \item Image size increase (224x224): ✗ Fark yaratmadı
+\end{itemize}
+
+\section{Hybrid System Başarısızlığının Nedenleri}
+
+\subsection{Fundamental Issues}
+
+\begin{enumerate}
+    \item \textbf{Weak VAE Foundation:} VAE zaten kötü (ROC-AUC: 0.55) → Hybrid'e katkı negatif
+    \item \textbf{Score Normalization Difficulty:} VAE error ve CNN prob'u aynı scale'e getirmek zor
+    \item \textbf{Alpha Optimization Problem:} Grid-search dual constraint'i sağlayamıyor
+    \item \textbf{Threshold Instability:} Train/test'te farklı çalışıyor
+\end{enumerate}
+
+\subsection{Grid-Search Limitations}
+
+\begin{itemize}
+    \item 2D search space (alpha, threshold) çok büyük
+    \item Dual constraint (benign ≥0.70 AND malignant ≥0.85) çok strict
+    \item Validation-based normalization yeterli değil
+    \item Logit transformation da yardımcı olmadı
+\end{itemize}
+
+\section{Class Imbalance Impact}
+
+\begin{table}[H]
+\centering
+\caption{Class Imbalance Effects}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Approach} & \textbf{Effect} & \textbf{Result} \\
+\midrule
+WeightedRandomSampler & Balanced sampling & Yardımcı olmadı \\
+Class weights (Benign×1.3) & Loss weighting & Yetersiz \\
+Class weights (Benign×2.0) & Strong weighting & Overfitting \\
+Target benign recall=0.95 & High constraint & Malignant feda edildi \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Two-Stage Decision Failure}
+
+\textbf{Hypothesis:} CNN confidence thresholds ile direkt karar vermek, hybrid'den daha iyi olacak.
+
+\textbf{Reality:} İki extreme:
+\begin{itemize}
+    \item High threshold (0.85): Çok az sample direkt malignant olarak sınıflandırıldı (14\%)
+    \item Low threshold (0.50): Çok az sample direkt benign olarak sınıflandırıldı (0.3\%)
+    \item Hybrid bölge (85.4\%): Hala kötü performans
+\end{itemize}
+
+\chapter{Önerilen Çözümler ve Gelecek Çalışmalar}
+
+\section{Kısa Vadeli Çözümler}
+
+\subsection{CNN-Only Approach (Recommended)}
+
+\textbf{Neden?}
+\begin{itemize}
+    \item VAE ve Hybrid çalışmıyor
+    \item CNN tek başına muhtemelen daha iyi (test edilmeli)
+    \item Daha basit ve stable
+    \item Grad-CAM ile explainable
+\end{itemize}
+
+\textbf{Önerilen Konfigürasyon:}
+\begin{lstlisting}[language=Python]
+# CNN-only with optimized threshold
+model = ResNet18(pretrained=True)
+threshold = find_optimal_threshold(
+    target_malignant_recall=0.75,
+    target_benign_recall=0.60
+)
+\end{lstlisting}
+
+\subsection{Ensemble CNN Approach}
+
+\textbf{3-5 CNN modeli farklı seed'lerle eğit:}
+\begin{itemize}
+    \item Model 1: seed=42
+    \item Model 2: seed=123
+    \item Model 3: seed=456
+    \item Average probabilities
+    \item Daha stable predictions
+\end{itemize}
+
+\textbf{Beklenen İyileşme:} +2-5\% accuracy
+
+\section{Orta Vadeli İyileştirmeler}
+
+\subsection{Data Collection}
+
+\begin{itemize}
+    \item \textbf{Daha fazla data:} 1000 → 5000+ images
+    \item \textbf{High-quality annotations:} Multiple radiologist consensus
+    \item \textbf{Balanced dataset:} 1:1 ratio (benign:malignant)
+\end{itemize}
+
+\subsection{Advanced Architectures}
+
+\begin{enumerate}
+    \item \textbf{U-Net Segmentation:} Kanserli bölgeyi segment et
+    \item \textbf{Attention Mechanisms:} Self-attention layers ekle
+    \item \textbf{Vision Transformers:} ViT veya Swin Transformer dene
+    \item \textbf{EfficientNet:} Daha efficient backbone kullan
+\end{enumerate}
+
+\section{Uzun Vadeli Araştırma Yönleri}
+
+\subsection{Multi-Modal Fusion}
+
+\begin{itemize}
+    \item Doppler ultrasound + B-mode birleştir
+    \item Clinical features (patient age, gender, TSH levels) ekle
+    \item Multi-view images (different angles) kullan
+\end{itemize}
+
+\subsection{3D Analysis}
+
+\begin{itemize}
+    \item Video sequences analiz et (temporal information)
+    \item 3D Convolutional Networks
+    \item Recurrent architectures (LSTM, GRU)
+\end{itemize}
+
+\subsection{Semi-Supervised Learning}
+
+\begin{itemize}
+    \item Unlabeled data kullan (çok fazla var)
+    \item Self-supervised pretraining
+    \item Contrastive learning (SimCLR, MoCo)
+\end{itemize}
+
+\chapter{Sonuç}
+
+\section{Proje Özeti}
+
+Bu projede, tiroid ultrasound görüntülerinden kanser tespiti için VAE ve CNN tabanlı hybrid bir sistem geliştirilmeye çalışılmıştır. Farklı yaklaşımlar denenmiş ve kapsamlı deneysel analizler yapılmıştır.
+
+\section{Başarılar}
+
+\begin{itemize}
+    \item ✓ VAE implementasyonu (teorik olarak doğru)
+    \item ✓ CNN transfer learning (ResNet18)
+    \item ✓ Comprehensive augmentation pipeline
+    \item ✓ Beta annealing strategy
+    \item ✓ SSIM + MAE + MSE hybrid loss
+    \item ✓ Grid-search optimization framework
+    \item ✓ Two-stage decision mechanism
+    \item ✓ Grad-CAM visualization
+    \item ✓ Mixed precision training
+    \item ✓ Detailed experimentation and documentation
+\end{itemize}
+
+\section{Başarısızlıklar ve Öğrenilenler}
+
+\begin{itemize}
+    \item ✗ \textbf{VAE anomaly detection çalışmadı} (ROC-AUC: 0.55)
+        \begin{itemize}
+            \item Benign/malignant çok benzer
+            \item Dataset çok küçük
+            \item Ultrasound inherently noisy
+        \end{itemize}
+    \item ✗ \textbf{Hybrid system başarısız oldu} (Accuracy: 0.48-0.60)
+        \begin{itemize}
+            \item VAE weak foundation
+            \item Score normalization problematic
+            \item Dual constraint sağlanamadı
+        \end{itemize}
+    \item ✗ \textbf{Benign-malignant trade-off çözülemedi}
+        \begin{itemize}
+            \item Benign recall ↑ → Malignant recall ↓
+            \item Malignant recall ↑ → Benign recall ↓
+            \item Balanced solution bulunamadı
+        \end{itemize}
+\end{itemize}
+
+\section{Final Recommendation}
+
+\textbf{CNN-only approach ile devam edilmeli:}
+
+\begin{enumerate}
+    \item VAE ve Hybrid'i unut
+    \item ResNet18/50 tek başına kullan
+    \item Threshold optimization yap (balanced recall)
+    \item Grad-CAM ile explainability sağla
+    \item (Opsiyonel) Ensemble 3-5 model
+    \item Beklenen performance: 70-80\% accuracy
+\end{enumerate}
+
+\section{Klinik Uygulanabilirlik}
+
+\textbf{Mevcut Sistem:} Klinik kullanıma uygun değil
+\begin{itemize}
+    \item False negative rate çok yüksek (14-84\%)
+    \item False positive rate çok yüksek (79-99\%)
+    \item Balanced performance yok
+\end{itemize}
+
+\textbf{Gerekli İyileştirmeler:}
+\begin{itemize}
+    \item Accuracy > 85\%
+    \item Malignant recall > 90\% (false negative < 10\%)
+    \item Benign recall > 70\%
+    \item Explainable predictions (Grad-CAM)
+    \item Clinical validation (prospective study)
+    \item FDA approval process
+\end{itemize}
+
+\chapter*{Teşekkürler}
+
+Bu proje kapsamında VAE, CNN, Transfer Learning, Hybrid Systems, Grid-Search Optimization, Explainable AI gibi birçok state-of-the-art teknik uygulanmış ve detaylı deneyler yapılmıştır. Her ne kadar hedeflenen performansa ulaşılamasa da, süreç boyunca öğrenilenler ve karşılaşılan zorlukların analizi, gelecek çalışmalar için değerli bir kaynak oluşturmaktadır.
+
+\appendix
+
+\chapter{Kod Deposu}
+
+Tüm kaynak kodlar GitHub'da mevcuttur:
+
+\texttt{https://github.com/cemresude/tiroid-kanser-tespiti}
+
+\chapter{Kullanılan Teknolojiler}
+
+\begin{itemize}
+    \item Python 3.8+
+    \item PyTorch 2.0+
+    \item torchvision
+    \item scikit-learn
+    \item pandas, numpy
+    \item matplotlib, seaborn
+    \item opencv-python
+    \item optuna (hyperparameter optimization)
+    \item pytorch-msssim
+\end{itemize}
+
+\end{document}
