@@ -55,34 +55,34 @@ def get_transforms(train=True):
             SquarePad(),
             transforms.Resize((224, 224)),
             
-            # GÜÇLENDİRİLMİŞ AUGMENTASYON
-            transforms.RandomHorizontalFlip(p=0.6),  # 0.5'ten 0.6'ya
-            transforms.RandomVerticalFlip(p=0.5),    # 0.4'ten 0.5'e
-            transforms.RandomRotation(30),            # 20'den 30'a artırıldı
+            # GÜÇLENDİRİLMİŞ AUGMENTASYON (PIL Image üzerinde)
+            transforms.RandomHorizontalFlip(p=0.6),
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomRotation(30),
             
-            # Daha agresif color augmentation
             transforms.ColorJitter(
-                brightness=0.4,   # 0.3'ten 0.4'e
-                contrast=0.4,     # 0.3'ten 0.4'e
-                saturation=0.4,   # 0.3'ten 0.4'e
-                hue=0.2          # 0.15'ten 0.2'ye
+                brightness=0.4,
+                contrast=0.4,
+                saturation=0.4,
+                hue=0.2
             ),
             
-            # Scale augmentation daha agresif
             transforms.RandomAffine(
                 degrees=0, 
-                translate=(0.2, 0.2),   # 0.15'ten 0.2'ye
-                scale=(0.85, 1.15)      # (0.9, 1.1)'den genişletildi
+                translate=(0.2, 0.2),
+                scale=(0.85, 1.15)
             ),
             
-            # Blur artırıldı
-            transforms.RandomApply([transforms.GaussianBlur(kernel_size=5)], p=0.3),  # p=0.2'den 0.3'e, kernel 3'ten 5'e
+            transforms.RandomApply([transforms.GaussianBlur(kernel_size=5)], p=0.3),
             
-            # YENİ: Random erasing (cutout)
-            transforms.RandomErasing(p=0.1, scale=(0.02, 0.1)),
-            
+            # ToTensor ÖNCE (PIL → Tensor)
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            
+            # Normalize
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            
+            # RandomErasing SON (Tensor üzerinde)
+            transforms.RandomErasing(p=0.1, scale=(0.02, 0.1)),
         ])
     else:
         return transforms.Compose([
