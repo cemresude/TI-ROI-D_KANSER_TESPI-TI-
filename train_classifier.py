@@ -27,11 +27,10 @@ def train_epoch(model, train_loader, criterion, optimizer, scaler, device):
         
         with autocast():
             outputs = model(images)
-            loss = criterion(outputs, labels)
+            loss = criterion(outputs, labels)  # CrossEntropyLoss returns scalar by default
         
-        # Ensure loss is scalar
-        if loss.dim() != 0:
-            loss = loss.mean()
+        # Verify loss is scalar
+        assert loss.dim() == 0, f"Loss is not scalar: shape={loss.shape}"
         
         if not torch.isfinite(loss):
             print(f"Warning: Non-finite loss detected: {loss.item()}")
@@ -72,9 +71,8 @@ def validate(model, val_loader, criterion, device):
                 outputs = model(images)
                 loss = criterion(outputs, labels)
             
-            # Ensure loss is scalar
-            if loss.dim() != 0:
-                loss = loss.mean()
+            # Verify loss is scalar
+            assert loss.dim() == 0, f"Loss is not scalar: shape={loss.shape}"
             
             total_loss += loss.item() * batch_size
             num_samples += batch_size
@@ -159,7 +157,7 @@ def main():
     class_counts = np.bincount(all_labels)
     class_weights = 1.0 / class_counts
     class_weights = class_weights / class_weights.sum()
-    class_weights[0] *= 1.2
+    class_weights[0] *= Config.BENIGN_CLASS_WEIGHT_MULTIPLIER  # 1.5x artırıldı
     class_weights = class_weights / class_weights.sum()
     
     print(f"Class weights: Benign={class_weights[0]:.3f}, Malignant={class_weights[1]:.3f}")

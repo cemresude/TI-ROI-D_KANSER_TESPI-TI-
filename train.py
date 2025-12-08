@@ -21,24 +21,32 @@ def train_epoch(model, train_loader, optimizer, device, beta, use_ssim=True):
     total_loss = 0
     total_recon_loss = 0
     total_kl_loss = 0
+    num_samples = 0
     
     for images, _ in tqdm(train_loader, desc='Training'):
         images = images.to(device)
+        batch_size = images.size(0)
         
         optimizer.zero_grad()
         recon_images, mu, logvar = model(images)
         loss, recon_loss, kl_loss = vae_loss(recon_images, images, mu, logvar, beta, use_ssim=use_ssim)
         
+        # loss, recon_loss, kl_loss are already scalars
+        if not torch.isfinite(loss):
+            print(f"Warning: Non-finite loss detected: {loss.item()}")
+            continue
+        
         loss.backward()
         optimizer.step()
         
-        total_loss += loss.item()
-        total_recon_loss += recon_loss.item()
-        total_kl_loss += kl_loss.item()
+        total_loss += loss.item() * batch_size
+        total_recon_loss += recon_loss.item() * batch_size
+        total_kl_loss += kl_loss.item() * batch_size
+        num_samples += batch_size
     
-    avg_loss = total_loss / len(train_loader.dataset)
-    avg_recon = total_recon_loss / len(train_loader.dataset)
-    avg_kl = total_kl_loss / len(train_loader.dataset)
+    avg_loss = total_loss / num_samples if num_samples > 0 else 0
+    avg_recon = total_recon_loss / num_samples if num_samples > 0 else 0
+    avg_kl = total_kl_loss / num_samples if num_samples > 0 else 0
     
     return avg_loss, avg_recon, avg_kl
 
@@ -47,20 +55,25 @@ def validate(model, val_loader, device, beta, use_ssim=True):
     total_loss = 0
     total_recon_loss = 0
     total_kl_loss = 0
+    num_samples = 0
     
     with torch.no_grad():
         for images, _ in tqdm(val_loader, desc='Validation'):
             images = images.to(device)
+            batch_size = images.size(0)
+            
             recon_images, mu, logvar = model(images)
             loss, recon_loss, kl_loss = vae_loss(recon_images, images, mu, logvar, beta, use_ssim=use_ssim)
             
-            total_loss += loss.item()
-            total_recon_loss += recon_loss.item()
-            total_kl_loss += kl_loss.item()
+            # loss, recon_loss, kl_loss are already scalars
+            total_loss += loss.item() * batch_size
+            total_recon_loss += recon_loss.item() * batch_size
+            total_kl_loss += kl_loss.item() * batch_size
+            num_samples += batch_size
     
-    avg_loss = total_loss / len(val_loader.dataset)
-    avg_recon = total_recon_loss / len(val_loader.dataset)
-    avg_kl = total_kl_loss / len(val_loader.dataset)
+    avg_loss = total_loss / num_samples if num_samples > 0 else 0
+    avg_recon = total_recon_loss / num_samples if num_samples > 0 else 0
+    avg_kl = total_kl_loss / num_samples if num_samples > 0 else 0
     
     return avg_loss, avg_recon, avg_kl
 

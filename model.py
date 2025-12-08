@@ -153,34 +153,41 @@ class ConvVAE(nn.Module):
 def vae_loss(recon_x, x, mu, logvar, beta=1.0, use_ssim=True, ssim_weight=0.5):
     """
     VAE Loss: (MSE + SSIM) + beta * KL Divergence
-    
-    Args:
-        recon_x: Reconstructed images
-        x: Original images
-        mu: Latent mean
-        logvar: Latent log variance
-        beta: KL divergence weight (for beta-VAE annealing)
-        use_ssim: Whether to use SSIM loss
-        ssim_weight: Weight for SSIM vs MSE (0.5 means 50-50)
+    Returns SCALAR losses averaged over the batch
     """
     batch_size = x.size(0)
     
     # Reconstruction loss
     if use_ssim:
-        # MSE Loss
-        mse_loss = F.mse_loss(recon_x, x, reduction='sum')
+        # MSE Loss (per sample, then mean)
+        mse_loss = F.mse_loss(recon_x, x, reduction='none')
+        mse_loss = mse_loss.view(batch_size, -1).mean(dim=1)  # [batch_size]
+        mse_loss = mse_loss.mean()  # scalar
         
-        # SSIM Loss (1 - SSIM for minimization)
-        ssim_loss = (1 - ssim(recon_x, x, data_range=1.0, size_average=False)) * batch_size
+        # SSIM Loss
+        try:
+            ssim_val = ssim(recon_x, x, data_range=1.0, size_average=True)  # scalar
+            ssim_loss = 1.0 - ssim_val  # scalar
+        except Exception as e:
+            print(f"SSIM computation failed: {e}. Falling back to MSE only.")
+            ssim_loss = 0.0
         
-        # Combined reconstruction loss
+        # Combined reconstruction loss (scalar)
         recon_loss = (1 - ssim_weight) * mse_loss + ssim_weight * ssim_loss
     else:
-        recon_loss = F.mse_loss(recon_x, x, reduction='sum')
+        # MSE only (scalar)
+        recon_loss = F.mse_loss(recon_x, x, reduction='mean')
     
-    # KL Divergence
-    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    # KL Divergence (per sample, then mean)
+    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)  # [batch_size]
+    kl_loss = kl_loss.mean()  # scalar
     
+    # Total loss (scalar)
     total_loss = recon_loss + beta * kl_loss
+    
+    # Ensure all are scalars
+    assert total_loss.dim() == 0, f"total_loss is not scalar: shape={total_loss.shape}"
+    assert recon_loss.dim() == 0, f"recon_loss is not scalar: shape={recon_loss.shape}"
+    assert kl_loss.dim() == 0, f"kl_loss is not scalar: shape={kl_loss.shape}"
     
     return total_loss, recon_loss, kl_loss

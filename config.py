@@ -17,12 +17,12 @@ class Config:
     
     # Beta annealing parametreleri
     BETA_START = 0.0
-    BETA_END = 0.001
-    BETA_WARMUP_EPOCHS = 20
+    BETA_END = 0.005  # 0.001'den 0.005'e artırıldı
+    BETA_WARMUP_EPOCHS = 15  # 20'den 15'e düşürüldü (daha hızlı)
     
     # SSIM loss
     USE_SSIM = True
-    SSIM_WEIGHT = 0.5
+    SSIM_WEIGHT = 0.3  # 0.5'ten 0.3'e düşürüldü (MSE daha dominant)
     
     # CNN Classifier parametreleri
     CLASSIFIER_BACKBONE = 'resnet18'  # 'resnet18' veya 'resnet50'
@@ -35,6 +35,22 @@ class Config:
     HYBRID_ALPHA = 0.75  # VAE ağırlığı (0.7-0.8 önerilir)
     TARGET_BENIGN_RECALL = 0.95  # Hedef benign recall
     USE_CNN_CALIBRATION = True  # CNN probability calibration
+    
+    # Hybrid System V3 parametreleri (Grid-search optimized)
+    HYBRID_ALPHA_RANGE = [0.2, 0.3, 0.4, 0.5, 0.6]  # Grid-search için alpha aralığı
+    HYBRID_ALPHA = 0.4  # Default (grid-search sonrası güncellenecek)
+    TARGET_MALIGNANT_RECALL = 0.85  # Malignant recall hedefi
+    TARGET_BENIGN_RECALL = 0.95  # Benign recall hedefi (opsiyonel)
+    
+    # Two-stage decision
+    CNN_HIGH_CONFIDENCE_THRESHOLD = 0.7  # CNN p_cls ≥ 0.7 ise doğrudan malignant
+    CNN_LOW_CONFIDENCE_THRESHOLD = 0.3   # CNN p_cls ≤ 0.3 ise doğrudan benign
+    
+    # Normalization strategy
+    NORMALIZATION_METHOD = 'validation'  # 'validation', 'zscore', 'minmax'
+    
+    # CNN training (benign recall artırma)
+    BENIGN_CLASS_WEIGHT_MULTIPLIER = 1.5  # 1.2'den 1.5'e artırıldı
     
     # Genel parametreler
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
