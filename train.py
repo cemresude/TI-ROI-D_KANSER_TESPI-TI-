@@ -16,7 +16,7 @@ def get_beta_annealing(epoch, max_epochs, start_beta=0.0, end_beta=1.0, warmup_e
         return start_beta + (end_beta - start_beta) * (epoch / warmup_epochs)
     return end_beta
 
-def train_epoch(model, train_loader, optimizer, device, beta, use_ssim=True):
+def train_epoch(model, train_loader, optimizer, device, beta, use_ssim=True, use_mae=True):
     model.train()
     total_loss = 0
     total_recon_loss = 0
@@ -29,7 +29,15 @@ def train_epoch(model, train_loader, optimizer, device, beta, use_ssim=True):
         
         optimizer.zero_grad()
         recon_images, mu, logvar = model(images)
-        loss, recon_loss, kl_loss = vae_loss(recon_images, images, mu, logvar, beta, use_ssim=use_ssim)
+        
+        # Yeni loss function (MAE + SSIM + MSE)
+        loss, recon_loss, kl_loss = vae_loss(
+            recon_images, images, mu, logvar, beta, 
+            use_ssim=use_ssim, use_mae=use_mae,
+            ssim_weight=Config.SSIM_WEIGHT,
+            mae_weight=Config.MAE_WEIGHT,
+            mse_weight=Config.MSE_WEIGHT
+        )
         
         # loss, recon_loss, kl_loss are already scalars
         if not torch.isfinite(loss):

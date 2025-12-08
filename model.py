@@ -150,44 +150,43 @@ class ConvVAE(nn.Module):
         recon_x = self.decode(z)
         return recon_x, mu, logvar
 
-def vae_loss(recon_x, x, mu, logvar, beta=1.0, use_ssim=True, ssim_weight=0.5):
+def vae_loss(recon_x, x, mu, logvar, beta=1.0, use_ssim=True, use_mae=True, 
+             ssim_weight=0.4, mae_weight=0.3, mse_weight=0.3):
     """
-    VAE Loss: (MSE + SSIM) + beta * KL Divergence
-    Returns SCALAR losses averaged over the batch
+    İyileştirilmiş VAE Loss: MAE + SSIM + MSE + beta * KL
     """
     batch_size = x.size(0)
     
-    # Reconstruction loss
-    if use_ssim:
-        # MSE Loss (per sample, then mean)
+    # Reconstruction loss components
+    recon_loss = 0.0
+    
+    # 1. MSE Loss
+    if mse_weight > 0:
         mse_loss = F.mse_loss(recon_x, x, reduction='none')
-        mse_loss = mse_loss.view(batch_size, -1).mean(dim=1)  # [batch_size]
-        mse_loss = mse_loss.mean()  # scalar
-        
-        # SSIM Loss
+        mse_loss = mse_loss.view(batch_size, -1).mean(dim=1).mean()
+        recon_loss += mse_weight * mse_loss
+    
+    # 2. MAE Loss (L1)
+    if use_mae and mae_weight > 0:
+        mae_loss = F.l1_loss(recon_x, x, reduction='none')
+        mae_loss = mae_loss.view(batch_size, -1).mean(dim=1).mean()
+        recon_loss += mae_weight * mae_loss
+    
+    # 3. SSIM Loss
+    if use_ssim and ssim_weight > 0:
         try:
-            ssim_val = ssim(recon_x, x, data_range=1.0, size_average=True)  # scalar
-            ssim_loss = 1.0 - ssim_val  # scalar
+            ssim_val = ssim(recon_x, x, data_range=1.0, size_average=True)
+            ssim_loss = 1.0 - ssim_val
+            recon_loss += ssim_weight * ssim_loss
         except Exception as e:
-            print(f"SSIM computation failed: {e}. Falling back to MSE only.")
-            ssim_loss = 0.0
-        
-        # Combined reconstruction loss (scalar)
-        recon_loss = (1 - ssim_weight) * mse_loss + ssim_weight * ssim_loss
-    else:
-        # MSE only (scalar)
-        recon_loss = F.mse_loss(recon_x, x, reduction='mean')
+            print(f"SSIM failed: {e}")
     
-    # KL Divergence (per sample, then mean)
-    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)  # [batch_size]
-    kl_loss = kl_loss.mean()  # scalar
+    # KL Divergence
+    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1).mean()
     
-    # Total loss (scalar)
+    # Total loss
     total_loss = recon_loss + beta * kl_loss
     
-    # Ensure all are scalars
-    assert total_loss.dim() == 0, f"total_loss is not scalar: shape={total_loss.shape}"
-    assert recon_loss.dim() == 0, f"recon_loss is not scalar: shape={recon_loss.shape}"
-    assert kl_loss.dim() == 0, f"kl_loss is not scalar: shape={kl_loss.shape}"
+    assert total_loss.dim() == 0, f"Loss not scalar: {total_loss.shape}"
     
     return total_loss, recon_loss, kl_loss
